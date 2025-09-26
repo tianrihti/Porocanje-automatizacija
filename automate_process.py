@@ -1,3 +1,5 @@
+import os
+import time
 import logging
 from datetime import datetime, timedelta
 from typing import List, Optional, Set
@@ -7,31 +9,63 @@ import win32com.client
 import xlwings as xw
 import psutil
 from collections import Counter
+import json
 
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-ROW_START = 6
-ROW_END = 44
-COLS_TO_COPY = 3
-ANALYZE_ROW_START = 7
-ANALYZE_ROW_END = 46
-BRIZGANJE_COL_A = 1
-BRIZGANJE_COL_L = 12
-BRIZGANJE_COL_M = 13
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
+
+def load_config():
+    if os.path.exists(CONFIG_PATH):
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+def save_config(config):
+    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2)
+
+config = load_config()
+
+PLAN_ROW_DATE = config.get("PLAN_ROW_DATE", 4) 
+PLAN_ROW_FIKSNO = config.get("PLAN_ROW_FIKSNO", 5) 
+PLAN_ROW_START = config.get("PLAN_ROW_START", 6)
+PLAN_ROW_END = config.get("PLAN_ROW_END", 44)
+PLAN_COLS_TO_COPY = config.get("PLAN_COLS_TO_COPY", 3)
+BRIZGANJE_ROW_4 = config.get("BRIZGANJE_ROW_4", 4)
+BRIZGANJE_ROW_7 = config.get("BRIZGANJE_ROW_7", 7)
+BRIZGANJE_ROW_46 = config.get("BRIZGANJE_ROW_46", 46)
+BRIZGANJE_COL_A = config.get("BRIZGANJE_COL_A", 1)
+BRIZGANJE_COL_L = config.get("BRIZGANJE_COL_L", 12)
+BRIZGANJE_COL_M = config.get("BRIZGANJE_COL_M", 13)   
+IZBOR_COL_AA = config.get("IZBOR_COL_AA", 27)         
+IZBOR_COL_F = config.get("IZBOR_COL_F", 6)           
+IZBOR_COL_M = config.get("IZBOR_COL_M", 13)
+LIST2_ROW_2 = config.get("LIST2_ROW_2", 2)           
+LIST2_COL_T = config.get("LIST2_COL_T", 20)
+LIST2_COL_AA = config.get("LIST2_COL_AA", 27)
+LIST2_ROW_8 = config.get("LIST2_ROW_8", 8)
+LIST2_ROW_9 = config.get("LIST2_ROW_9", 9)
+LIST2_ROW_27 = config.get("LIST2_ROW_27", 27)
+LIST2_COL_C = config.get("LIST2_COL_C", 3)
+LIST2_COL_B = config.get("LIST2_COL_B", "B")
+LIST2_COL_L = config.get("LIST2_COL_L", "L")
+LIST2_ROW_1 = config.get("LIST2_ROW_1", 1)
+BRIZGANJE_COL_H = config.get("BRIZGANJE_COL_H", 8) 
+BRIZGANJE_COL_I = config.get("BRIZGANJE_COL_I", 9)      
+BRIZGANJE_COL_E = config.get("BRIZGANJE_COL_E", 5)     
+IZBOR_COL_S = config.get("IZBOR_COL_S", 19)    
+BRIZGANJE_COL_C = config.get("BRIZGANJE_COL_C", 3)     
+BRIZGANJE_COL_D = config.get("BRIZGANJE_COL_D", 4)     
 
 class ExcelAutomation:
     def __init__(self):
-        self.pregled_file = os.path.abspath('torek (1).xls')
-        self.porocanje_file = os.path.abspath("poročanje proizvodnje2025.xlsm")
-
-        self.plan_file = os.path.abspath("plan brizganja 2025 mesečni.xlsx")
-
-        # Validate files exist
-        self._validate_files()
-
+        self.pregled_file = None
+        self.porocanje_file = None
+        self.plan_file = None
         self.change_log_path = os.path.join(os.path.dirname(__file__), "excel_changes.log")
 
     def _validate_files(self):
@@ -61,7 +95,7 @@ class ExcelAutomation:
         
     def step1_copy_pregled_data(self) -> pd.DataFrame:
         """Step 1: Copy data from Pregled.xls"""
-        logger.info("Step 1: Copying data from Pregled.xls")
+        logger.info(f"Step 1: Copying data from {self.pregled_file}")
         
         try:
             # Read Pregled.xls
@@ -69,16 +103,16 @@ class ExcelAutomation:
                 df = pd.read_excel(self.pregled_file, sheet_name="Sheet1", engine='xlrd')
             except ImportError:
                 df = pd.read_excel(self.pregled_file, sheet_name="Sheet1", engine='openpyxl')
-            
-            logger.info(f"Successfully read Pregled.xls with {len(df)} rows")
+
+            logger.info(f"Successfully read {self.pregled_file} with {len(df)} rows")
             return df
             
         except Exception as e:
-            logger.error(f"Error reading Pregled.xls: {e}")
+            logger.error(f"Error reading {self.pregled_file}: {e}")
             raise
     
     def step2_paste_to_porocanje(self, data_df: pd.DataFrame) -> bool:
-        logger.info("Step 2: Pasting data into poročanje proizvodnje2025.xlsm (safe method)")
+        logger.info(f"Step 2: Pasting data into {self.porocanje_file} (safe method)")
         try:
             wb = load_workbook(self.porocanje_file, keep_vba=True)
             ws = wb['prilepi gosoft'] if 'prilepi gosoft' in wb.sheetnames else wb.create_sheet('prilepi gosoft')
@@ -91,7 +125,7 @@ class ExcelAutomation:
             logger.info(f"Successfully pasted {len(data_df)} rows to 'prilepi gosoft' sheet (safe method)")
             return True
         except Exception as e:
-            logger.error(f"Error pasting data to poročanje proizvodnje2025.xlsm (safe method): {e}")
+            logger.error(f"Error pasting data to {self.porocanje_file} (safe method): {e}")
             raise
 
     def get_target_date(self, holidays: Optional[Set[datetime.date]] = None) -> datetime:
@@ -160,7 +194,7 @@ class ExcelAutomation:
             target_col = None
             
             for col in range(1, ws.max_column + 1):
-                cell_value = ws.cell(row=4, column=col).value
+                cell_value = ws.cell(row=PLAN_ROW_DATE, column=col).value
                 if cell_value:
                     # Try to parse as date
                     if isinstance(cell_value, datetime):
@@ -177,16 +211,15 @@ class ExcelAutomation:
                         logger.info(f"Found target date at column {col}")
 
                         # Check if the cell below contains "Fiksno"
-                        fiksno_cell = ws.cell(row=5, column=col).value
+                        fiksno_cell = ws.cell(row=PLAN_ROW_FIKSNO, column=col).value
                         if fiksno_cell == "Fiksno":
                             logger.info("Found 'Fiksno' below the target date")
                         else:
-                            raise ValueError("Plan is not fixed yet")
-                        
+                            raise ValueError("Plan is not fixed yet")                           
                         break
         
             if not date_found:
-                raise ValueError(f"Target date {target_date.strftime('%Y-%m-%d')} not found in row 4")
+                raise ValueError(f"Target date {target_date.strftime('%Y-%m-%d')} not found in row {PLAN_ROW_DATE}")
             
             return target_col
             
@@ -203,11 +236,11 @@ class ExcelAutomation:
             ws = wb["plan"]
 
             copied_data = [
-                [ws.cell(row=row, column=start_col + col_offset).value for col_offset in range(COLS_TO_COPY)]
-                for row in range(ROW_START, ROW_END + 1)
+                [ws.cell(row=row, column=start_col + col_offset).value for col_offset in range(PLAN_COLS_TO_COPY)]
+                for row in range(PLAN_ROW_START, PLAN_ROW_END + 1)
             ]
 
-            logger.info(f"Copied range from column {start_col} to {start_col+2}, rows {ROW_START} to {ROW_END}")
+            logger.info(f"Copied range from column {start_col} to {start_col+2}, rows {PLAN_ROW_START} to {PLAN_ROW_END}")
             return copied_data
 
         except Exception as e:
@@ -230,7 +263,7 @@ class ExcelAutomation:
             # Search row 4, starting from column D (index 4)
             target_col = None
             for col in range(1, ws.max_column + 1):
-                cell_value = ws.cell(row=4, column=col).value
+                cell_value = ws.cell(row=BRIZGANJE_ROW_4, column=col).value
                 if cell_value:
                     try:
                         cell_date = cell_value.date() if isinstance(cell_value, datetime) else pd.to_datetime(cell_value).date()
@@ -246,17 +279,16 @@ class ExcelAutomation:
                 raise ValueError(f"Target date {prev_working_day.strftime('%Y-%m-%d')} not found in row 4")
 
             paste_col = target_col - 1  # One column to the left
-
             logger.info(f"Pasting values into column {paste_col}")
 
             # Clear the target range
-            clear_range = ws[f"{ws.cell(row=4, column=paste_col).column_letter}4:{ws.cell(row=4+len(copied_data), column=paste_col+2).column_letter}{4+len(copied_data)}"]
+            clear_range = ws[f"{ws.cell(row=BRIZGANJE_ROW_4, column=paste_col).column_letter}{BRIZGANJE_ROW_4}:{ws.cell(row=BRIZGANJE_ROW_4+len(copied_data), column=paste_col+2).column_letter}{BRIZGANJE_ROW_4+len(copied_data)}"]
             for row in clear_range:
                 for cell in row:
                     cell.value = None
 
             # Paste copied_data into brizganje izracun sheet
-            start_row = 4
+            start_row = BRIZGANJE_ROW_4 
             for i, row_data in enumerate(copied_data):
                 for j, value in enumerate(row_data):
                     ws.cell(row=start_row + i, column=paste_col + j, value=value)
@@ -269,7 +301,7 @@ class ExcelAutomation:
 
     def step6_analyze_brizganje(self) -> List[str]:
         try:
-            logger.info("Step 6: Analyzing rows 7 to 46 in 'brizganje izračun'")
+            logger.info(f"Step 6: Analyzing rows {BRIZGANJE_ROW_7} to {BRIZGANJE_ROW_46} in 'brizganje izračun'")
 
             # Load workbook with formula results
             wb = load_workbook(self.porocanje_file, data_only=True)
@@ -278,7 +310,7 @@ class ExcelAutomation:
             saved_texts = []
             
             logger.setLevel(logging.DEBUG)
-            for row in range(ANALYZE_ROW_START, ANALYZE_ROW_END + 1):
+            for row in range(BRIZGANJE_ROW_7, BRIZGANJE_ROW_46 + 1):
                 cell_a = ws.cell(row=row, column=BRIZGANJE_COL_A).value  # Column A
                 if not cell_a:
                     continue  # Skip if column A is empty
@@ -299,7 +331,7 @@ class ExcelAutomation:
                 except (TypeError, ValueError):
                     continue  # Skip if not a number
 
-                if value_m > 25:
+                if value_m >= 20:
                     saved_texts.append(str(cell_a))  # Save value from column A
 
             logger.info(f"Saved texts: {saved_texts}")
@@ -366,31 +398,34 @@ class ExcelAutomation:
             
             # Delete all existing shapes (images) in the range A7:M44
             for shape in brizganje_izracun_sheet.Shapes:
-                if (7 <= shape.TopLeftCell.Row <= 44 and 
-                    1 <= shape.TopLeftCell.Column <= 13): 
+                if (BRIZGANJE_ROW_7 <= shape.TopLeftCell.Row <= BRIZGANJE_ROW_46 and 
+                    BRIZGANJE_COL_A <= shape.TopLeftCell.Column <= IZBOR_COL_M): 
                     shape.Delete()
 
             for text in saved_texts:
                 logger.info(f"Processing text: {text}")
 
                 # a. Filter data in Izbor sheet manually
-                last_row = izbor_sheet.Cells(izbor_sheet.Rows.Count, "F").End(-4162).Row
+                last_row = izbor_sheet.Cells(izbor_sheet.Rows.Count, IZBOR_COL_F).End(-4162).Row
                 filtered_data = []
 
                 for row in range(1, last_row + 1):
-                    cell_value = izbor_sheet.Cells(row, 27).Value  # Column AA
+                    cell_value = izbor_sheet.Cells(row, IZBOR_COL_AA).Value  # Column AA
                     if cell_value == text or row == 1:  # Include header row
-                        row_data = [izbor_sheet.Cells(row, col).Value for col in range(6, 14)]  # Columns F to M
+                        row_data = [izbor_sheet.Cells(row, col).Value for col in range(IZBOR_COL_F, IZBOR_COL_M + 1)]  # Columns F to M
                         filtered_data.append(row_data)
 
                 # b. Clear List2 target range
-                last_row_list2 = list2_sheet.Cells(list2_sheet.Rows.Count, "T").End(-4162).Row
-                list2_sheet.Range(f"T2:AA{last_row_list2}").ClearContents()
+                last_row_list2 = list2_sheet.Cells(list2_sheet.Rows.Count, LIST2_COL_T).End(-4162).Row
+                list2_sheet.Range(
+                    list2_sheet.Cells(LIST2_ROW_2, LIST2_COL_T),
+                    list2_sheet.Cells(last_row_list2, LIST2_COL_AA)
+                ).ClearContents()
 
                 # c. Paste filtered data into List2 sheet
                 for i, row_data in enumerate(filtered_data):
                     for j, value in enumerate(row_data):
-                        list2_sheet.Cells(i + 1, 20 + j).Value = value  # Start from column T (20th column)
+                        list2_sheet.Cells(i + 1, LIST2_COL_T + j).Value = value  # Start from column T (20th column)
 
                 # d. Execute macro (gumb1)
                 excel.Run("sortiraj")
@@ -404,7 +439,7 @@ class ExcelAutomation:
                 excel.CutCopyMode = False  # Clear clipboard
 
             # Set the height of rows 7 to 44 to 16.5 if they don't contain an image
-            for row in range(7, 45):
+            for row in range(BRIZGANJE_ROW_7, BRIZGANJE_ROW_46 + 1):
                 has_image = False
                 for shape in brizganje_izracun_sheet.Shapes:
                     if shape.TopLeftCell.Row == row:
@@ -449,30 +484,30 @@ class ExcelAutomation:
         logger.info("Step 8: Copying processed data from List2")
 
         # Find the last row with data in column C
-        last_row = 8  # Default to row 8
-        for row in range(9, 28):  # Check rows 9 and 10
-            if list2_sheet.Cells(row, 3).Value:  # Column C
+        last_row = LIST2_ROW_8  # Default to row 8
+        for row in range(LIST2_ROW_9, LIST2_ROW_27 + 1):  # Check rows 9 to 27
+            if list2_sheet.Cells(row, LIST2_COL_C).Value:  # Column C
                 last_row = row
 
         # Construct the range to copy
-        range_to_copy = list2_sheet.Range(f"B1:L{last_row}")
+        range_to_copy = list2_sheet.Range(f"{LIST2_COL_B}{LIST2_ROW_1}:{LIST2_COL_L}{last_row}")
         range_to_copy.CopyPicture(Appearance=1, Format=2)  # Copy as picture
 
-        logger.info(f"Successfully copied range B1:L{last_row} from List2 as picture")
+        logger.info(f"Successfully copied range {LIST2_COL_B}{LIST2_ROW_1}:{LIST2_COL_L}{last_row} from List2 as picture")
 
     def step9_paste_as_image(self, brizganje_izracun_sheet, text):
         """Step 9: Paste as image in 'brizganje izračun' sheet"""
         logger.info(f"Step 9: Pasting as image for text '{text}'")
 
-        last_row_brizganje = brizganje_izracun_sheet.Cells(brizganje_izracun_sheet.Rows.Count, "A").End(-4162).Row
+        last_row_brizganje = brizganje_izracun_sheet.Cells(brizganje_izracun_sheet.Rows.Count, BRIZGANJE_COL_A).End(-4162).Row
         target_row = None
         for row in range(1, last_row_brizganje + 1):
-            if brizganje_izracun_sheet.Cells(row, 1).Value == text:
+            if brizganje_izracun_sheet.Cells(row, BRIZGANJE_COL_A).Value == text:
                 target_row = row + 1  # Go one row below
                 break
 
         if target_row:
-            target_cell = brizganje_izracun_sheet.Cells(target_row, 1)
+            target_cell = brizganje_izracun_sheet.Cells(target_row, BRIZGANJE_COL_A)
             brizganje_izracun_sheet.Paste(target_cell, Link=False)
     
             # Get the last pasted shape (which should be our image)
@@ -488,8 +523,9 @@ class ExcelAutomation:
         else:
             logger.warning(f"Could not find row for text '{text}' in 'brizganje izračun' sheet")
 
+
     def scan_brizganje_errors(self):
-        logger.info("Scanning for errors in 'brizganje izračun' column H, rows 7–45")
+        logger.info(f"Scanning for errors in 'brizganje izračun' column {BRIZGANJE_COL_H}, rows {BRIZGANJE_ROW_7}–{BRIZGANJE_ROW_46}")
         excel = win32com.client.Dispatch("Excel.Application")
         excel.Visible = False
         wb = excel.Workbooks.Open(self.porocanje_file)
@@ -500,8 +536,8 @@ class ExcelAutomation:
         fixed_errors = []
         try:
             last_row_izbor = izbor_sheet.Cells(izbor_sheet.Rows.Count, "F").End(-4162).Row
-            for row in range(7, 46):
-                cell_h = ws.Cells(row, 8).Value  # Column H
+            for row in range(BRIZGANJE_ROW_7, BRIZGANJE_ROW_46 + 1):
+                cell_h = ws.Cells(row, BRIZGANJE_COL_H).Value  # Column H
 
                 # Check for Excel error values (including COM error constants)
                 if cell_h is None:
@@ -520,11 +556,11 @@ class ExcelAutomation:
                     except Exception:
                         continue
 
-                cell_i = ws.Cells(row, 9).Value  # Column I
+                cell_i = ws.Cells(row, BRIZGANJE_COL_I).Value  # Column I
                 if not cell_i:
-                    old_value = ws.Cells(row, 5).Value
-                    ws.Cells(row, 5).Value = None  # Delete value in column E
-                    sifra = ws.Cells(row, 1).Value  # Column A
+                    old_value = ws.Cells(row, BRIZGANJE_COL_E).Value
+                    ws.Cells(row, BRIZGANJE_COL_E).Value = None  # Delete value in column E
+                    sifra = ws.Cells(row, BRIZGANJE_COL_A).Value  # Column A
                     self.log_excel_change(
                         self.porocanje_file, "brizganje izračun", f"E{row}", old_value, None, sifra=sifra, action="remove"
                     )
@@ -537,27 +573,27 @@ class ExcelAutomation:
                 # Find the most common value in column S for this text_key in Izbor
                 s_values = []
                 for izbor_row in range(2, last_row_izbor + 1):  # skip header row
-                    cell_aa = izbor_sheet.Cells(izbor_row, 27).Value  # Column AA
+                    cell_aa = izbor_sheet.Cells(izbor_row, IZBOR_COL_AA).Value  # Column AA
                     if cell_aa == text_key:
-                        value_s = izbor_sheet.Cells(izbor_row, 19).Value  # Column S
+                        value_s = izbor_sheet.Cells(izbor_row, IZBOR_COL_S).Value  # Column S
                         if value_s not in (None, ""):
                             s_values.append(value_s)
                 if s_values:
                     freq = Counter(s_values)
                     best_value, _ = freq.most_common(1)[0]
-                    logger.info(f"For text_key '{text_key}': best_value in column S: {best_value}")
+                    logger.info(f"For text_key '{text_key}': best_value in column {IZBOR_COL_S}: {best_value}")
                 else:
                     best_value = None
-                    logger.info(f"For text_key '{text_key}': no values found in column S")
-                    self.log_warning(f"Za {text_key}: nisem nasel vredonst {best_value} v stolpcu S na izboru")
+                    logger.info(f"For text_key '{text_key}': no values found in column {IZBOR_COL_S}")
+                    self.log_warning(f"Za {text_key}: nisem nasel vredonst {best_value} v stolpcu {IZBOR_COL_S} na izboru")
                     processed_keys.add(text_key)
                     continue
 
                 # Find the first row in brizganje izračun where column C matches best_value
                 values_to_copy = []
                 found_row = None
-                for c_row in range(7, 46):
-                    cell_c = ws.Cells(c_row, 3).Value  # Column C
+                for c_row in range(BRIZGANJE_ROW_7, BRIZGANJE_ROW_46 + 1):
+                    cell_c = ws.Cells(c_row, BRIZGANJE_COL_C).Value  # Column C
                     try:
                         # Try to compare as numbers if possible
                         if cell_c is not None and best_value is not None:
@@ -574,27 +610,27 @@ class ExcelAutomation:
                     if found_row:
                         # Copy C,D,E from c_row and c_row+1
                         for r in [c_row, c_row + 1]:
-                            row_values = [ws.Cells(r, col).Value for col in range(3, 6)]
+                            row_values = [ws.Cells(r, col).Value for col in [BRIZGANJE_COL_C, BRIZGANJE_COL_D, BRIZGANJE_COL_E]]
                             values_to_copy.extend(row_values)
                         break
 
                 if not values_to_copy or found_row is None:
                     logger.warning(f"No matching row found for best_value '{best_value}' for text_key '{text_key}'")
-                    self.log_warning(f"Ni sifre: '{best_value}' od: '{text_key}' v stolpcu C na brizganju izracuna")
+                    self.log_warning(f"Ni sifre: '{best_value}' od: '{text_key}' v stolpcu {BRIZGANJE_COL_C} na brizganju izracuna")
                     processed_keys.add(text_key)
                     continue
 
                 idx = 0
                 for r in [row, row + 1]:
-                    for col in range(3, 6):
+                    for col in [BRIZGANJE_COL_C, BRIZGANJE_COL_D, BRIZGANJE_COL_E]:
                         cell_ref = f"{chr(64+col)}{r}"
                         old_value = ws.Cells(r, col).Value
                         new_value = values_to_copy[idx]
                         ws.Cells(r, col).Value = new_value
                         idx += 1
 
-                source_sifra = ws.Cells(found_row, 1).Value
-                target_sifra = ws.Cells(row, 1).Value
+                source_sifra = ws.Cells(found_row, BRIZGANJE_COL_A).Value
+                target_sifra = ws.Cells(row, BRIZGANJE_COL_A).Value
                 self.log_excel_change(
                     self.porocanje_file, "brizganje izračun", f"C{row}", None, None, sifra=source_sifra, action="copy", target_sifra=target_sifra
                 )
@@ -613,44 +649,3 @@ class ExcelAutomation:
     def log_warning(self, message):
         with open(self.change_log_path, "a", encoding="utf-8") as f:
             f.write(f"WARNING - {message}\n")
-                    
-if __name__ == "__main__":
-    # Clear the log file before running
-    log_path = os.path.join(os.path.dirname(__file__), "excel_changes.log")
-    with open(log_path, "w", encoding="utf-8") as f:
-        pass  # This clears the file
-
-    # Create automation instance
-    automation = ExcelAutomation()
-    try:
-        automation.kill_excel_processes()
-        # Run step 1
-        pregled_data = automation.step1_copy_pregled_data()
-
-        # Run step 2
-        automation.step2_paste_to_porocanje(pregled_data)
-
-        # Run step 3
-        target_col = automation.step3_find_date_in_plan()
-
-        # Run step 4
-        plan_range_data = automation.step4_copy_plan_range(target_col)
-
-        # Run step 5
-        automation.step5_paste_to_brizganje(plan_range_data)
-
-        automation.recalc_excel()
-
-        automation.scan_brizganje_errors()
-
-        # Run step 6
-        saved_texts = automation.step6_analyze_brizganje()
-
-        # Run step 7
-        automation.step7_process_saved_texts(saved_texts)
-        
-    except Exception as e:
-        logger.error((f"An error occurred: {e}"))
-    finally:
-        automation.kill_excel_processes()
-        logger.info("Script execution finished")

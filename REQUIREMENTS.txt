@@ -1,0 +1,7 @@
+pandas
+openpyxl
+xlrd
+xlwings
+psutil
+pywin32
+tkinter
